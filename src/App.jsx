@@ -8,7 +8,6 @@ import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken }
 
 // ----------------------------------------------------------------------
 // BURAYA KENDİ FİREBASE BİLGİLERİNİZİ YAPIŞTIRIN
-// (Firebase Console > Project Settings > Web App kısmından aldığınız bilgiler)
 // ----------------------------------------------------------------------
 const fallbackFirebaseConfig = {
   apiKey: "AIzaSyAgpZAb7RnDh97R4nAM1Bvur5DnQiHn130",
@@ -26,7 +25,7 @@ const db = getFirestore(app);
 const auth = getAuth(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-// İlk Kurulum Verileri (Eğer veritabanı boşsa bunlar yüklenecek)
+// İlk Kurulum Verileri
 const initialDonationOptions = [
   { id: 'iftar_1', order: 1, title: '1 Talebeye İftar', price: 400, type: 'iftar', imageUrl: 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?q=80&w=500&auto=format&fit=crop', desc: 'Bir talebenin günlük iftar bedeli' },
   { id: 'iftar_masa', order: 2, title: '1 Masaya İftar', price: 1200, type: 'iftar', imageUrl: 'https://images.unsplash.com/photo-1618218168350-6e7c81151b64?q=80&w=500&auto=format&fit=crop', desc: 'Bir masadaki talebelerin iftar bedeli' },
@@ -37,8 +36,8 @@ const initialDonationOptions = [
 ];
 
 export default function App() {
-  const [options, setOptions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // GÜVENLİK KİLİDİ: State'i her zaman varsayılan verilerle başlatıyoruz, böylece ekran asla boş kalmaz.
+  const [options, setOptions] = useState(initialDonationOptions); 
   const [user, setUser] = useState(null);
 
   const [cart, setCart] = useState([]);
@@ -62,7 +61,7 @@ export default function App() {
           await signInAnonymously(auth);
         }
       } catch (error) {
-        console.error("Kimlik doğrulama hatası:", error);
+        console.error("Kimlik doğrulama hatası (Giriş yapılamadı):", error);
       }
     };
     initAuth();
@@ -75,16 +74,20 @@ export default function App() {
 
   // --- 2. VERİTABANINDAN VERİ ÇEKME ---
   useEffect(() => {
-    if (!user) return;
+    if (!user) return; // Kullanıcı girişi hatalı olsa bile initialDonationOptions ekranda kalmaya devam eder.
 
     // Koleksiyon referansı
     const optionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_options');
 
     const unsubscribe = onSnapshot(optionsRef, (snapshot) => {
       if (snapshot.empty) {
-        // Eğer veritabanı boşsa, ilk varsayılan verileri yükle
+        // Eğer veritabanı boşsa, varsayılan verileri Firebase'e kaydet
         initialDonationOptions.forEach(async (opt) => {
-          await setDoc(doc(optionsRef, opt.id), opt);
+          try {
+            await setDoc(doc(optionsRef, opt.id), opt);
+          } catch(err) {
+            console.error("Firebase'e yazma hatası:", err);
+          }
         });
       } else {
         // Veritabanından gelen güncel verileri ekrana yansıt
@@ -96,11 +99,10 @@ export default function App() {
         // Sıralamaya göre diz
         fetchedOptions.sort((a, b) => a.order - b.order);
         setOptions(fetchedOptions);
-        setLoading(false);
       }
     }, (error) => {
-      console.error("Veri çekme hatası:", error);
-      setLoading(false);
+      console.error("Firebase'den veri çekme hatası (İzin eksik olabilir):", error);
+      // Hata alınsa bile options state'inde veriler olduğu için ekran beyaz/boş kalmaz.
     });
 
     return () => unsubscribe();
@@ -199,7 +201,7 @@ export default function App() {
         await setDoc(docRef, { [field]: field === 'price' ? Number(value) : value }, { merge: true });
       } catch (error) {
         console.error("Güncelleme hatası: ", error);
-        alert("Bir hata oluştu, lütfen sayfayı yenileyip tekrar deneyin.");
+        alert("Bağlantı sorunu, ancak ekranda geçici olarak değişti.");
       }
     }
   };
@@ -207,16 +209,6 @@ export default function App() {
   const exitAdmin = () => {
     window.location.hash = ''; // Hash'i temizle, ana sayfaya dön
   };
-
-  // Yükleme Ekranı
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#071d15] flex flex-col items-center justify-center text-[#d4af37] gap-4">
-        <Loader2 className="w-12 h-12 animate-spin" />
-        <h2 className="text-xl font-bold tracking-widest">Afiş Yükleniyor...</h2>
-      </div>
-    );
-  }
 
   // --- ADMİN PANELİ GÖRÜNÜMÜ ---
   if (isAdmin) {
