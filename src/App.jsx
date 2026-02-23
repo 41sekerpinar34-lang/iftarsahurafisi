@@ -1,82 +1,115 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingCart, Plus, Minus, Trash2, Phone, MapPin, CreditCard, Moon, Sun, Users, User, Building, CheckCircle, Share2, X, Landmark, Lock, Camera, Settings, LogOut, Save, Edit3 } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Trash2, Phone, MapPin, CreditCard, Moon, Sun, Users, User, Building, CheckCircle, Share2, X, Landmark, Lock, Camera, Settings, LogOut, Save, Edit3, Loader2 } from 'lucide-react';
 
+// Firebase Importları
+import { initializeApp } from 'firebase/app';
+import { getFirestore, collection, onSnapshot, doc, setDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+
+// ----------------------------------------------------------------------
+// BURAYA KENDİ FİREBASE BİLGİLERİNİZİ YAPIŞTIRIN
+// (Firebase Console > Project Settings > Web App kısmından aldığınız bilgiler)
+// ----------------------------------------------------------------------
+const fallbackFirebaseConfig = {
+  apiKey: "AIzaSyAgpZAb7RnDh97R4nAM1Bvur5DnQiHn130",
+  authDomain: "ramazaniftar-77d16.firebaseapp.com",
+  projectId: "ramazaniftar-77d16",
+  storageBucket: "ramazaniftar-77d16.firebasestorage.app",
+  messagingSenderId: "308029182150",
+  appId: "1:308029182150:web:c743edaf73e405212d07c7"
+};
+
+// Firebase Başlatma (Güvenli Çapraz Ortam Kurulumu)
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackFirebaseConfig;
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+// İlk Kurulum Verileri (Eğer veritabanı boşsa bunlar yüklenecek)
 const initialDonationOptions = [
-  { 
-    id: 'iftar_1', 
-    title: '1 Talebeye İftar', 
-    price: 400, 
-    type: 'iftar', 
-    imageUrl: 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?q=80&w=500&auto=format&fit=crop',
-    desc: 'Bir talebenin günlük iftar bedeli' 
-  },
-  { 
-    id: 'iftar_masa', 
-    title: '1 Masaya İftar', 
-    price: 1600, 
-    type: 'iftar', 
-    imageUrl: 'https://images.unsplash.com/photo-1618218168350-6e7c81151b64?q=80&w=500&auto=format&fit=crop',
-    desc: 'Bir masadaki talebelerin iftar bedeli' 
-  },
-  { 
-    id: 'iftar_butun', 
-    title: 'Bütün Talebeye İftar', 
-    price: 20000, 
-    type: 'iftar', 
-    imageUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?q=80&w=500&auto=format&fit=crop',
-    desc: 'Tüm kursun günlük iftar bedeli' 
-  },
-  { 
-    id: 'sahur_1', 
-    title: '1 Talebeye Sahur', 
-    price: 200, 
-    type: 'sahur', 
-    imageUrl: 'https://images.unsplash.com/photo-1505346220862-2f311ebf6727?q=80&w=500&auto=format&fit=crop',
-    desc: 'Bir talebenin günlük sahur bedeli' 
-  },
-  { 
-    id: 'sahur_masa', 
-    title: '1 Masaya Sahur', 
-    price: 800, 
-    type: 'sahur', 
-    imageUrl: 'https://images.unsplash.com/photo-1414235077428-338988a2e8c0?q=80&w=500&auto=format&fit=crop',
-    desc: 'Bir masadaki talebelerin sahur bedeli' 
-  },
-  { 
-    id: 'sahur_butun', 
-    title: 'Bütün Talebeye Sahur', 
-    price: 10000, 
-    type: 'sahur', 
-    imageUrl: 'https://images.unsplash.com/photo-1528605248644-14dd04022da1?q=80&w=500&auto=format&fit=crop',
-    desc: 'Tüm kursun günlük sahur bedeli' 
-  }
+  { id: 'iftar_1', order: 1, title: '1 Talebeye İftar', price: 400, type: 'iftar', imageUrl: 'https://images.unsplash.com/photo-1584269600464-37b1b58a9fe7?q=80&w=500&auto=format&fit=crop', desc: 'Bir talebenin günlük iftar bedeli' },
+  { id: 'iftar_masa', order: 2, title: '1 Masaya İftar', price: 1200, type: 'iftar', imageUrl: 'https://images.unsplash.com/photo-1618218168350-6e7c81151b64?q=80&w=500&auto=format&fit=crop', desc: 'Bir masadaki talebelerin iftar bedeli' },
+  { id: 'iftar_butun', order: 3, title: 'Bütün Talebeye İftar', price: 10000, type: 'iftar', imageUrl: 'https://images.unsplash.com/photo-1555939594-58d7cb561ad1?q=80&w=500&auto=format&fit=crop', desc: 'Tüm kursun günlük iftar bedeli' },
+  { id: 'sahur_1', order: 4, title: '1 Talebeye Sahur', price: 200, type: 'sahur', imageUrl: 'https://images.unsplash.com/photo-1505346220862-2f311ebf6727?q=80&w=500&auto=format&fit=crop', desc: 'Bir talebenin günlük sahur bedeli' },
+  { id: 'sahur_masa', order: 5, title: '1 Masaya Sahur', price: 400, type: 'sahur', imageUrl: 'https://images.unsplash.com/photo-1414235077428-338988a2e8c0?q=80&w=500&auto=format&fit=crop', desc: 'Bir masadaki talebelerin sahur bedeli' },
+  { id: 'sahur_butun', order: 6, title: 'Bütün Talebeye Sahur', price: 5000, type: 'sahur', imageUrl: 'https://images.unsplash.com/photo-1528605248644-14dd04022da1?q=80&w=500&auto=format&fit=crop', desc: 'Tüm kursun günlük sahur bedeli' }
 ];
 
 export default function App() {
+  const [options, setOptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(null);
+
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationText, setNotificationText] = useState('');
-  const [checkoutStep, setCheckoutStep] = useState('cart'); // 'cart', 'payment', 'success'
-  const [paymentMethod, setPaymentMethod] = useState('credit_card'); // 'credit_card', 'transfer'
+  const [checkoutStep, setCheckoutStep] = useState('cart');
+  const [paymentMethod, setPaymentMethod] = useState('credit_card');
 
-  const [options, setOptions] = useState(initialDonationOptions);
-  
-  // Admin Paneli Durumu
   const [isAdmin, setIsAdmin] = useState(false);
   const fileInputRef = useRef(null);
   const [editingImageId, setEditingImageId] = useState(null);
 
+  // --- 1. FIREBASE KİMLİK DOĞRULAMA (ANONİM) ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (error) {
+        console.error("Kimlik doğrulama hatası:", error);
+      }
+    };
+    initAuth();
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- 2. VERİTABANINDAN VERİ ÇEKME ---
+  useEffect(() => {
+    if (!user) return;
+
+    // Koleksiyon referansı
+    const optionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_options');
+
+    const unsubscribe = onSnapshot(optionsRef, (snapshot) => {
+      if (snapshot.empty) {
+        // Eğer veritabanı boşsa, ilk varsayılan verileri yükle
+        initialDonationOptions.forEach(async (opt) => {
+          await setDoc(doc(optionsRef, opt.id), opt);
+        });
+      } else {
+        // Veritabanından gelen güncel verileri ekrana yansıt
+        const fetchedOptions = [];
+        snapshot.forEach((doc) => {
+          fetchedOptions.push({ id: doc.id, ...doc.data() });
+        });
+        
+        // Sıralamaya göre diz
+        fetchedOptions.sort((a, b) => a.order - b.order);
+        setOptions(fetchedOptions);
+        setLoading(false);
+      }
+    }, (error) => {
+      console.error("Veri çekme hatası:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
   // URL Hash değişikliklerini dinle (Admin paneline giriş için)
   useEffect(() => {
-    const checkAdminHash = () => {
-      setIsAdmin(window.location.hash === '#admin');
-    };
-    
-    // İlk yüklemede kontrol et
+    const checkAdminHash = () => setIsAdmin(window.location.hash === '#admin');
     checkAdminHash();
-    
-    // Hash değiştiğinde kontrol et
     window.addEventListener('hashchange', checkAdminHash);
     return () => window.removeEventListener('hashchange', checkAdminHash);
   }, []);
@@ -87,9 +120,7 @@ export default function App() {
     setCart((prevCart) => {
       const existingItem = prevCart.find((cartItem) => cartItem.id === item.id);
       if (existingItem) {
-        return prevCart.map((cartItem) =>
-          cartItem.id === item.id ? { ...cartItem, quantity: cartItem.quantity + 1 } : cartItem
-        );
+        return prevCart.map((cartItem) => cartItem.id === item.id ? { ...cartItem, quantity: cartItem.quantity + 1 } : cartItem);
       }
       return [...prevCart, { ...item, quantity: 1 }];
     });
@@ -111,9 +142,7 @@ export default function App() {
     );
   };
 
-  const removeFromCart = (id) => {
-    setCart((prevCart) => prevCart.filter((item) => item.id !== id));
-  };
+  const removeFromCart = (id) => setCart((prevCart) => prevCart.filter((item) => item.id !== id));
 
   const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
@@ -132,7 +161,7 @@ export default function App() {
     }
   };
 
-  // --- ADMİN FONKSİYONLARI ---
+  // --- ADMİN FONKSİYONLARI (FİREBASE KAYITLI) ---
 
   const handleImageEditClick = (id) => {
     setEditingImageId(id);
@@ -144,23 +173,50 @@ export default function App() {
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
-      const newImageUrl = URL.createObjectURL(file);
-      updateOption(editingImageId, 'imageUrl', newImageUrl);
+      // Resmi Base64 formatına çevirip veritabanına kaydetmek için FileReader kullanıyoruz
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result;
+        updateOption(editingImageId, 'imageUrl', base64String);
+      };
+      reader.readAsDataURL(file);
     }
     if (event.target) event.target.value = '';
   };
 
-  const updateOption = (id, field, value) => {
+  const updateOption = async (id, field, value) => {
+    // 1. Ekranı anında güncelle (hızlı deneyim için)
     setOptions(prevOptions => 
       prevOptions.map(opt => 
         opt.id === id ? { ...opt, [field]: field === 'price' ? Number(value) : value } : opt
       )
     );
+
+    // 2. Firebase'e Kalıcı Olarak Kaydet
+    if (user) {
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ramazan_options', id);
+        await setDoc(docRef, { [field]: field === 'price' ? Number(value) : value }, { merge: true });
+      } catch (error) {
+        console.error("Güncelleme hatası: ", error);
+        alert("Bir hata oluştu, lütfen sayfayı yenileyip tekrar deneyin.");
+      }
+    }
   };
 
   const exitAdmin = () => {
     window.location.hash = ''; // Hash'i temizle, ana sayfaya dön
   };
+
+  // Yükleme Ekranı
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#071d15] flex flex-col items-center justify-center text-[#d4af37] gap-4">
+        <Loader2 className="w-12 h-12 animate-spin" />
+        <h2 className="text-xl font-bold tracking-widest">Afiş Yükleniyor...</h2>
+      </div>
+    );
+  }
 
   // --- ADMİN PANELİ GÖRÜNÜMÜ ---
   if (isAdmin) {
@@ -189,10 +245,10 @@ export default function App() {
           </div>
 
           {/* Uyarı Mesajı */}
-          <div className="bg-blue-900/20 border border-blue-500/30 text-blue-200 p-4 rounded-xl mb-8 flex items-start gap-3">
-            <CheckCircle className="w-6 h-6 text-blue-400 shrink-0 mt-0.5" />
+          <div className="bg-green-900/20 border border-green-500/30 text-green-200 p-4 rounded-xl mb-8 flex items-start gap-3">
+            <CheckCircle className="w-6 h-6 text-green-400 shrink-0 mt-0.5" />
             <p className="text-sm leading-relaxed">
-              <strong>Geçici Önizleme:</strong> Şu anki değişiklikleriniz sadece bu tarayıcı sekmesinde geçerlidir. Projeyi Vercel'e yüklediğinizde herkesin aynı değişiklikleri görebilmesi için bir <strong>veritabanı (bulut depolama)</strong> bağlantısı kurmamız gerekecek. Şimdilik arayüzü ve resimleri test edebilirsiniz.
+              <strong>Bulut Bağlantısı Aktif!</strong> Yaptığınız tüm resim, isim ve fiyat değişiklikleri anında veritabanına kaydedilir. Sitenize giren tüm kullanıcılar otomatik olarak en güncel halini görecektir. <i>(İpucu: Resimlerinizi yüklerken çok büyük boyutlu olmamasına özen gösterin).</i>
             </p>
           </div>
 
@@ -205,7 +261,7 @@ export default function App() {
                 
                 {/* Resim Düzenleme Kısmı */}
                 <div className="w-full md:w-1/3 flex flex-col gap-3">
-                  <div className="relative h-48 rounded-lg overflow-hidden border-2 border-[#114b32] group">
+                  <div className="relative h-48 rounded-lg overflow-hidden border-2 border-[#114b32] group bg-black">
                     <img src={option.imageUrl} alt={option.title} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                       <button 
@@ -303,7 +359,7 @@ export default function App() {
           </div>
         </header>
 
-        {/* Bağış Seçenekleri Izgarası (Kullanıcı Görünümü - Kamerasz) */}
+        {/* Bağış Seçenekleri Izgarası */}
         <main className="flex-grow p-4 md:p-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
             {options.map((option) => (
@@ -324,7 +380,7 @@ export default function App() {
                     alt={option.title} 
                     className="w-full h-full object-cover opacity-90 group-hover:opacity-100 group-hover:scale-110 transition-all duration-500"
                   />
-                  {/* Karartma Efekti (Alt kısım fiyatı netleştirir) */}
+                  {/* Karartma Efekti */}
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                 </div>
                 
