@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ShoppingCart, Plus, Minus, Trash2, Phone, MapPin, CreditCard, Moon, Sun, Users, User, Building, CheckCircle, Share2, X, Landmark, Lock, Camera, Settings, LogOut, Save, Edit3, Loader2 } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Trash2, Phone, MapPin, CreditCard, Moon, Sun, Users, User, Building, CheckCircle, Share2, X, Landmark, Lock, Camera, Settings, LogOut, Save, Edit3, Loader2, AlertTriangle } from 'lucide-react';
 
 // Firebase Importları
 import { initializeApp } from 'firebase/app';
@@ -7,7 +7,7 @@ import { getFirestore, collection, onSnapshot, doc, setDoc } from 'firebase/fire
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 
 // ----------------------------------------------------------------------
-// BURAYA KENDİ FİREBASE BİLGİLERİNİZİ YAPIŞTIRIN
+// KENDİ FİREBASE BİLGİLERİNİZ
 // ----------------------------------------------------------------------
 const fallbackFirebaseConfig = {
   apiKey: "AIzaSyAgpZAb7RnDh97R4nAM1Bvur5DnQiHn130",
@@ -18,7 +18,6 @@ const fallbackFirebaseConfig = {
   appId: "1:308029182150:web:c743edaf73e405212d07c7"
 };
 
-// Firebase Başlatma (Güvenli Çapraz Ortam Kurulumu)
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -36,9 +35,9 @@ const initialDonationOptions = [
 ];
 
 export default function App() {
-  // GÜVENLİK KİLİDİ: State'i her zaman varsayılan verilerle başlatıyoruz, böylece ekran asla boş kalmaz.
   const [options, setOptions] = useState(initialDonationOptions); 
   const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
 
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -62,53 +61,54 @@ export default function App() {
         }
       } catch (error) {
         console.error("Kimlik doğrulama hatası (Giriş yapılamadı):", error);
+      } finally {
+        setAuthChecked(true);
       }
     };
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
+      setAuthChecked(true);
     });
     return () => unsubscribe();
   }, []);
 
-  // --- 2. VERİTABANINDAN VERİ ÇEKME ---
+  // --- 2. VERİTABANINDAN VERİ ÇEKME VE BİRLEŞTİRME ---
   useEffect(() => {
-    if (!user) return; // Kullanıcı girişi hatalı olsa bile initialDonationOptions ekranda kalmaya devam eder.
+    if (!user) return; 
 
-    // Koleksiyon referansı
     const optionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_options');
 
     const unsubscribe = onSnapshot(optionsRef, (snapshot) => {
       if (snapshot.empty) {
-        // Eğer veritabanı boşsa, varsayılan verileri Firebase'e kaydet
+        // DB boşsa varsayılanları kaydet
         initialDonationOptions.forEach(async (opt) => {
-          try {
-            await setDoc(doc(optionsRef, opt.id), opt);
-          } catch(err) {
-            console.error("Firebase'e yazma hatası:", err);
-          }
+          try { await setDoc(doc(optionsRef, opt.id), opt); } catch(err) { }
         });
       } else {
-        // Veritabanından gelen güncel verileri ekrana yansıt
-        const fetchedOptions = [];
+        // DB'deki verilerle varsayılanları akıllıca birleştir (Eksik alan kalmasın)
+        const fetchedOptionsMap = {};
         snapshot.forEach((doc) => {
-          fetchedOptions.push({ id: doc.id, ...doc.data() });
+          fetchedOptionsMap[doc.id] = doc.data();
         });
         
-        // Sıralamaya göre diz
-        fetchedOptions.sort((a, b) => a.order - b.order);
-        setOptions(fetchedOptions);
+        const mergedOptions = initialDonationOptions.map(initialOpt => {
+          const dbOpt = fetchedOptionsMap[initialOpt.id] || {};
+          return { ...initialOpt, ...dbOpt };
+        });
+
+        mergedOptions.sort((a, b) => a.order - b.order);
+        setOptions(mergedOptions);
       }
     }, (error) => {
-      console.error("Firebase'den veri çekme hatası (İzin eksik olabilir):", error);
-      // Hata alınsa bile options state'inde veriler olduğu için ekran beyaz/boş kalmaz.
+      console.error("Firebase'den veri çekme hatası:", error);
     });
 
     return () => unsubscribe();
   }, [user]);
 
-  // URL Hash değişikliklerini dinle (Admin paneline giriş için)
+  // URL Hash değişikliklerini dinle
   useEffect(() => {
     const checkAdminHash = () => setIsAdmin(window.location.hash === '#admin');
     checkAdminHash();
@@ -116,8 +116,7 @@ export default function App() {
     return () => window.removeEventListener('hashchange', checkAdminHash);
   }, []);
 
-  // --- SEPET VE KULLANICI FONKSİYONLARI ---
-
+  // --- SEPET FONKSİYONLARI ---
   const addToCart = (item) => {
     setCart((prevCart) => {
       const existingItem = prevCart.find((cartItem) => cartItem.id === item.id);
@@ -126,60 +125,64 @@ export default function App() {
       }
       return [...prevCart, { ...item, quantity: 1 }];
     });
-    
     setNotificationText(`${item.title} eklendi.`);
     setShowNotification(true);
     setTimeout(() => setShowNotification(false), 2000);
   };
 
-  const updateQuantity = (id, delta) => {
-    setCart((prevCart) =>
-      prevCart.map((item) => {
-        if (item.id === id) {
-          const newQuantity = item.quantity + delta;
-          return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
-        }
-        return item;
-      })
-    );
-  };
-
-  const removeFromCart = (id) => setCart((prevCart) => prevCart.filter((item) => item.id !== id));
-
+  const updateQuantity = (id, delta) => setCart(prev => prev.map(item => item.id === id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item));
+  const removeFromCart = (id) => setCart(prev => prev.filter((item) => item.id !== id));
   const totalAmount = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
   const handleShare = async () => {
     const text = `Şekerpınar Nazmi Balcı Erkek Öğrenci Yurdu Ramazan-ı Şerif İftar ve Sahur kampanyasına sen de destek ol!`;
     if (navigator.share) {
-      try {
-        await navigator.share({ title: 'İftar ve Sahur Bağışı', text: text, url: window.location.href.replace('#admin', '') });
-      } catch (err) {
-        console.log('Paylaşım iptal edildi.', err);
-      }
+      try { await navigator.share({ title: 'İftar ve Sahur Bağışı', text: text, url: window.location.href.replace('#admin', '') }); } catch (err) {}
     } else {
       navigator.clipboard.writeText(text + " " + window.location.href.replace('#admin', ''));
       alert("Bağlantı kopyalandı!");
     }
   };
 
-  // --- ADMİN FONKSİYONLARI (FİREBASE KAYITLI) ---
-
+  // --- ADMİN FONKSİYONLARI VE RESİM SIKIŞTIRMA ---
   const handleImageEditClick = (id) => {
     setEditingImageId(id);
-    if (fileInputRef.current) {
-      fileInputRef.current.click();
-    }
+    if (fileInputRef.current) fileInputRef.current.click();
   };
 
   const handleFileChange = (event) => {
     const file = event.target.files[0];
     if (file) {
-      // Resmi Base64 formatına çevirip veritabanına kaydetmek için FileReader kullanıyoruz
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64String = reader.result;
-        updateOption(editingImageId, 'imageUrl', base64String);
+        // Resmi Sıkıştırmak için Canvas Kullanımı (Firebase 1MB sınırına takılmamak için)
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 800;
+          const MAX_HEIGHT = 800;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height && width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          } else if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // Kaliteyi %70'e düşürerek base64 oluştur
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
+          updateOption(editingImageId, 'imageUrl', compressedBase64);
+        };
+        img.src = reader.result;
       };
       reader.readAsDataURL(file);
     }
@@ -187,28 +190,30 @@ export default function App() {
   };
 
   const updateOption = async (id, field, value) => {
-    // 1. Ekranı anında güncelle (hızlı deneyim için)
+    // KONTROL: Eğer kullanıcı Firebase'e bağlanamadıysa anında hata ver.
+    if (!user) {
+      alert("HATA: Firebase veritabanına bağlanılamadı! Lütfen Firebase Console üzerinden Authentication (Kimlik Doğrulama) kısmından 'Anonymous' (Anonim) girişin aktif olduğundan emin olun.");
+      return; 
+    }
+
+    // Ekranı anında güncelle
     setOptions(prevOptions => 
       prevOptions.map(opt => 
         opt.id === id ? { ...opt, [field]: field === 'price' ? Number(value) : value } : opt
       )
     );
 
-    // 2. Firebase'e Kalıcı Olarak Kaydet
-    if (user) {
-      try {
-        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ramazan_options', id);
-        await setDoc(docRef, { [field]: field === 'price' ? Number(value) : value }, { merge: true });
-      } catch (error) {
-        console.error("Güncelleme hatası: ", error);
-        alert("Bağlantı sorunu, ancak ekranda geçici olarak değişti.");
-      }
+    // Firebase'e Kalıcı Olarak Kaydet
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'ramazan_options', id);
+      await setDoc(docRef, { [field]: field === 'price' ? Number(value) : value }, { merge: true });
+    } catch (error) {
+      console.error("Güncelleme hatası: ", error);
+      alert(`Firebase'e kaydedilemedi: ${error.message}`);
     }
   };
 
-  const exitAdmin = () => {
-    window.location.hash = ''; // Hash'i temizle, ana sayfaya dön
-  };
+  const exitAdmin = () => window.location.hash = '';
 
   // --- ADMİN PANELİ GÖRÜNÜMÜ ---
   if (isAdmin) {
@@ -236,13 +241,25 @@ export default function App() {
             </button>
           </div>
 
-          {/* Uyarı Mesajı */}
-          <div className="bg-green-900/20 border border-green-500/30 text-green-200 p-4 rounded-xl mb-8 flex items-start gap-3">
-            <CheckCircle className="w-6 h-6 text-green-400 shrink-0 mt-0.5" />
-            <p className="text-sm leading-relaxed">
-              <strong>Bulut Bağlantısı Aktif!</strong> Yaptığınız tüm resim, isim ve fiyat değişiklikleri anında veritabanına kaydedilir. Sitenize giren tüm kullanıcılar otomatik olarak en güncel halini görecektir. <i>(İpucu: Resimlerinizi yüklerken çok büyük boyutlu olmamasına özen gösterin).</i>
-            </p>
-          </div>
+          {/* DİNAMİK UYARI MESAJLARI */}
+          {!user && authChecked ? (
+            <div className="bg-red-900/40 border-2 border-red-500 text-red-200 p-5 rounded-xl mb-8 flex items-start gap-4 shadow-lg">
+              <AlertTriangle className="w-8 h-8 text-red-400 shrink-0 mt-1 animate-pulse" />
+              <div>
+                <h3 className="font-bold text-lg mb-1 text-red-300">Firebase Kimlik Doğrulama Hatası!</h3>
+                <p className="text-sm leading-relaxed">
+                  Şu anda yapılan değişiklikler <strong>kaydedilmeyecek</strong> ve sayfayı yenileyince silinecektir. Lütfen [console.firebase.google.com] adresine giderek <strong>Build &gt; Authentication</strong> menüsünden <strong>Anonymous (Anonim)</strong> girişi etkinleştirip (Enable) kaydedin.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-green-900/20 border border-green-500/30 text-green-200 p-4 rounded-xl mb-8 flex items-start gap-3">
+              <CheckCircle className="w-6 h-6 text-green-400 shrink-0 mt-0.5" />
+              <p className="text-sm leading-relaxed">
+                <strong>Bulut Bağlantısı Aktif!</strong> Yaptığınız tüm resim, isim ve fiyat değişiklikleri anında veritabanına kaydedilir. Büyük resimleriniz bile Firebase'in depolama sınırlarına takılmaması için otomatik olarak optimize edilip (küçültülüp) kaydedilecektir.
+              </p>
+            </div>
+          )}
 
           {/* İçerik Düzenleyici */}
           <div className="space-y-6">
