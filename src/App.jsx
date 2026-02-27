@@ -56,6 +56,9 @@ export default function App() {
   const [editingImageId, setEditingImageId] = useState(null);
   const [donationsList, setDonationsList] = useState([]); 
 
+  // Yüklenme (Loading) State'i eklendi
+  const [isDataLoading, setIsDataLoading] = useState(true);
+
   // --- 1. KİMLİK DOĞRULAMA VE URL KONTROLÜ ---
   useEffect(() => {
     // ÇÖZÜM 3: HTML Siteleri için ?grup=10 parametresini yakalama
@@ -124,12 +127,14 @@ export default function App() {
         initialDonationOptions.forEach(async (opt) => {
           try { await setDoc(doc(optionsRef, opt.id), opt); } catch(err) { }
         });
+        setIsDataLoading(false); // Yükleme bitti
       } else {
         const fetchedOptionsMap = {};
         snapshot.forEach((doc) => { fetchedOptionsMap[doc.id] = doc.data(); });
         const mergedOptions = initialDonationOptions.map(initialOpt => ({ ...initialOpt, ...(fetchedOptionsMap[initialOpt.id] || {}) }));
         mergedOptions.sort((a, b) => a.order - b.order);
         setOptions(mergedOptions);
+        setIsDataLoading(false); // Yükleme bitti
       }
     });
 
@@ -251,9 +256,9 @@ export default function App() {
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_donations'), donationData);
 
-        // ÇÖZÜM 2: E-Postanın başarılı şekilde gönderilmesini bekle (await eklendi)
+        // ÇÖZÜM 2: E-Postanın başarılı şekilde gönderilmesini bekle ve hataları yakala
         try {
-          await fetch('/api/send-email', {
+          const emailRes = await fetch('/api/send-email', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -263,6 +268,8 @@ export default function App() {
               total: totalAmount
             })
           });
+          const emailData = await emailRes.json();
+          if(!emailData.success) console.error("Mail API Hatası:", emailData.error);
         } catch(emailError) {
           console.error("Mail gönderilemedi ama bağış alındı", emailError);
         }
@@ -356,6 +363,15 @@ export default function App() {
     }
   };
 
+  // VERİLER YÜKLENİRKEN GÖSTERİLECEK EKRAN
+  if (isDataLoading) {
+    return (
+      <div className="min-h-screen bg-[#071d15] flex flex-col items-center justify-center text-[#d4af37] gap-4">
+        <Loader2 className="w-12 h-12 animate-spin" />
+        <h2 className="text-xl font-bold tracking-widest text-center">Afiş Bilgileri<br/>Hazırlanıyor...</h2>
+      </div>
+    );
+  }
 
   // --- ADMİN PANELİ GÖRÜNÜMÜ ---
   if (isAdmin) {

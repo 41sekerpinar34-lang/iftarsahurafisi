@@ -7,30 +7,26 @@ export default async function handler(req, res) {
   const SX = process.env.PAYNKOLAY_SX;
   const SECRET_KEY = process.env.PAYNKOLAY_SECRET_KEY;
 
-  // Başarılı ve başarısız durumlarda kullanıcıyı sitemize (?status=success parametresiyle) geri yönlendiriyoruz.
   const hostUrl = `https://${req.headers.host || 'iftarsahurafisi.vercel.app'}`;
   const successUrl = `${hostUrl}/?status=success`;
   const failUrl = `${hostUrl}/?status=fail`;
   
-  // Zaman Damgası Oluşturma (DD-MM-YYYY HH:mm:ss)
   const pad = (n) => n < 10 ? '0'+n : n;
   const now = new Date();
   const rnd = `${pad(now.getDate())}-${pad(now.getMonth()+1)}-${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-  // ÇÖZÜM 1: Tutarı Paynkolay'ın istediği gibi .00 (kuruşlu) formata zorluyoruz
+  // Tutar kesinlikle .00 formatında olmalı
   const formattedAmount = Number(amount).toFixed(2);
 
-  // Şifreleme (Hash) İşlemi
   const hashString = `${SX}|${orderId}|${formattedAmount}|${successUrl}|${failUrl}|${rnd}||${SECRET_KEY}`;
   const hashData = crypto.createHash('sha512').update(hashString).digest('base64');
 
-  // Form verilerini hazırlama
   const params = new URLSearchParams();
   params.append('sx', SX);
   params.append('clientRefCode', orderId);
   params.append('successUrl', successUrl);
   params.append('failUrl', failUrl);
-  params.append('amount', formattedAmount); // Düzenlenmiş tutar gönderiliyor
+  params.append('amount', formattedAmount);
   params.append('installmentNo', '1');
   params.append('cardHolderName', card.name);
   params.append('month', card.month);
@@ -42,30 +38,32 @@ export default async function handler(req, res) {
   params.append('rnd', rnd);
   params.append('hashDatav2', hashData);
   params.append('environment', 'API');
-  params.append('currencyNumber', '949'); // TL
+  params.append('currencyNumber', '949');
 
   try {
-    // Gerçek Canlı (PROD) Ortam URL'sine İstek
     const paynkolayRes = await fetch('https://paynkolay.nkolayislem.com.tr/Vpos/v1/Payment', {
        method: 'POST',
        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
        body: params.toString()
     });
     
-    // Paynkolay'ın gönderdiği yanıtı çek
-    const htmlContent = await paynkolayRes.text();
+    const textContent = await paynkolayRes.text();
 
-    // Eğer HTML formu yerine bankadan dönen bir JSON Hata Mesajı varsa yakala ve kullanıcıya göster
+    // Dönen yanıtı JSON olarak ayrıştırmayı dene
     try {
-      const jsonRes = JSON.parse(htmlContent);
-      if (jsonRes.RESPONSE_CODE === 0) {
-        return res.status(400).json({ message: jsonRes.RESPONSE_DATA || "Kredi kartı bilgilerinizde veya tutarda bir hata var." });
+      const jsonRes = JSON.parse(textContent);
+      // RESPONSE_CODE 2 = 3D Secure Hazırlık Başarılı
+      if (jsonRes.RESPONSE_CODE === 2 || jsonRes.RESPONSE_CODE === "2") {
+        return res.status(200).json({ htmlContent: jsonRes.BANK_REQUEST_MESSAGE || jsonRes.HTML_STRING });
+      } else if (jsonRes.RESPONSE_CODE === 0 || jsonRes.RESPONSE_CODE === "0") {
+        return res.status(400).json({ message: jsonRes.RESPONSE_DATA || "Kredi kartı işlemi reddedildi." });
       }
-    } catch (e) {
-      // JSON parse edilemediyse başarılı bir 3D HTML formu dönmüş demektir, devam et.
+    } catch(e) {
+      // Eğer JSON parse edilemezse (doğrudan HTML form döndüyse)
+      return res.status(200).json({ htmlContent: textContent });
     }
     
-    res.status(200).json({ htmlContent });
+    res.status(200).json({ htmlContent: textContent });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }

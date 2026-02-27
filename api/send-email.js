@@ -6,26 +6,29 @@ export default async function handler(req, res) {
   const { subject, message, customerDetails, total } = req.body;
 
   try {
-    // ÇÖZÜM 2: Nodemailer ayarları Vercel Serverless ortamına uygun olarak güncellendi.
     const transporter = nodemailer.createTransport({
       host: 'smtp.gmail.com',
-      port: 465,
-      secure: true, // SSL kullanımını zorunlu kılar
+      port: 465, // SSL portu
+      secure: true, // Güvenli bağlantı şart
       auth: {
         user: process.env.GMAIL_USER,
         pass: process.env.GMAIL_PASS 
       }
     });
 
+    // Gönderimi doğrulama adımı
+    await transporter.verify();
+
     const mailOptions = {
       from: process.env.GMAIL_USER,
-      to: process.env.GMAIL_USER, // Bildirim size geliyor
+      to: process.env.GMAIL_USER,
       subject: subject,
       text: `${message}\n\n-- MÜŞTERİ BİLGİLERİ --\nİsim: ${customerDetails.name}\nTelefon: ${customerDetails.phone}\nToplam Tutar: ${total} ₺`
     };
 
-    // E-postanın gitmesini bekliyoruz
-    await transporter.sendMail(mailOptions);
+    const info = await transporter.sendMail(mailOptions);
+    console.log("Email gönderildi: " + info.response);
+    
     res.status(200).json({ success: true, message: 'Email gönderildi.' });
   } catch (error) {
     console.error("Mail Gönderim Hatası:", error);
