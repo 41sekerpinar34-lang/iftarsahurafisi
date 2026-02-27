@@ -3,12 +3,9 @@ import { ShoppingCart, Plus, Minus, Trash2, Phone, MapPin, CreditCard, Moon, Sun
 
 // Firebase Importları
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 
-// ----------------------------------------------------------------------
-// KENDİ FİREBASE BİLGİLERİNİZ
-// ----------------------------------------------------------------------
 const fallbackFirebaseConfig = {
   apiKey: "AIzaSyAgpZAb7RnDh97R4nAM1Bvur5DnQiHn130",
   authDomain: "ramazaniftar-77d16.firebaseapp.com",
@@ -38,27 +35,22 @@ export default function App() {
   const [options, setOptions] = useState(initialDonationOptions); 
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-
-  // Linkten Grup ID'sini Yakalama
   const [urlGroupId, setUrlGroupId] = useState(null);
 
-  // Sepet ve Müşteri State'leri
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationText, setNotificationText] = useState('');
-  const [checkoutStep, setCheckoutStep] = useState('cart'); // cart, payment, paynkolay_3d, success
+  const [checkoutStep, setCheckoutStep] = useState('cart'); 
   const [paymentMethod, setPaymentMethod] = useState('credit_card'); 
   const [customerInfo, setCustomerInfo] = useState({ name: '', phone: '' });
   
-  // Paynkolay Kredi Kartı Bilgileri
   const [cardInfo, setCardInfo] = useState({ name: '', number: '', month: '', year: '', cvv: '' });
   const [paynkolayHtml, setPaynkolayHtml] = useState(''); 
 
-  // Admin State'leri
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminTab, setAdminTab] = useState('donations');
-  const [selectedAdminGroup, setSelectedAdminGroup] = useState('default'); // 'default' veya 'grup_adi'
+  const [selectedAdminGroup, setSelectedAdminGroup] = useState('default');
   const [customGroups, setCustomGroups] = useState([]);
   const fileInputRef = useRef(null);
   const [editingImageId, setEditingImageId] = useState(null);
@@ -66,18 +58,27 @@ export default function App() {
 
   // --- 1. KİMLİK DOĞRULAMA VE URL KONTROLÜ ---
   useEffect(() => {
-    // URL'deki Özel Grubu Bul (Örn: site.com/10 -> '10')
-    const path = window.location.pathname;
-    const parts = path.split('/').filter(Boolean);
-    if (parts.length > 0) {
-      const potentialGroup = parts[parts.length - 1];
-      if (!potentialGroup.includes('.html') && potentialGroup !== 'admin') {
-        setUrlGroupId(potentialGroup);
+    // ÇÖZÜM 3: HTML Siteleri için ?grup=10 parametresini yakalama
+    const searchParams = new URLSearchParams(window.location.search);
+    let potentialGroup = searchParams.get('grup') || searchParams.get('group') || searchParams.get('id');
+
+    // Eğer parametre yoksa, klasik /10 (Vercel) yolunu da destekle
+    if (!potentialGroup) {
+      const path = window.location.pathname;
+      const parts = path.split('/').filter(Boolean);
+      if (parts.length > 0) {
+        const lastPart = parts[parts.length - 1];
+        if (!lastPart.includes('.html') && lastPart !== 'admin') {
+          potentialGroup = lastPart;
+        }
       }
     }
 
+    if (potentialGroup) {
+      setUrlGroupId(potentialGroup);
+    }
+
     // Paynkolay 3D Başarılı Dönüş Kontrolü
-    const searchParams = new URLSearchParams(window.location.search);
     if (searchParams.get('status') === 'success') {
       setIsCartOpen(true);
       setCheckoutStep('success');
@@ -109,14 +110,12 @@ export default function App() {
   useEffect(() => {
     if (!user) return; 
 
-    // Kullanıcıya Görünecek Fiyatları Çek (Varsayılan veya URL'deki Grup)
     const activeGroupId = isAdmin && selectedAdminGroup !== 'default' ? selectedAdminGroup : (urlGroupId || 'default');
     
     let optionsRef;
     if (activeGroupId === 'default') {
       optionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_options');
     } else {
-      // Özel fiyatlandırma grubu çek
       optionsRef = collection(db, 'artifacts', appId, 'public', 'data', `ramazan_group_${activeGroupId}`);
     }
 
@@ -128,14 +127,12 @@ export default function App() {
       } else {
         const fetchedOptionsMap = {};
         snapshot.forEach((doc) => { fetchedOptionsMap[doc.id] = doc.data(); });
-        // Birleştirme İşlemi (Eksik alan kalmaması için)
         const mergedOptions = initialDonationOptions.map(initialOpt => ({ ...initialOpt, ...(fetchedOptionsMap[initialOpt.id] || {}) }));
         mergedOptions.sort((a, b) => a.order - b.order);
         setOptions(mergedOptions);
       }
     });
 
-    // Sadece Admin İse Tüm Grupları ve Gelen Bağışları Çek
     let unsubDonations = () => {};
     let unsubGroups = () => {};
     
@@ -221,13 +218,11 @@ export default function App() {
       }
       
       try {
-        setCheckoutStep('paynkolay_3d'); // Yükleniyor durumuna geçir
+        setCheckoutStep('paynkolay_3d'); 
         
-        // Önce işlemi pending olarak DB'ye kaydet
         const donationsRef = collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_donations');
         const docRef = await addDoc(donationsRef, donationData);
 
-        // Vercel Arka Uç API'sine İstek At
         const response = await fetch('/api/paynkolay', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -241,15 +236,14 @@ export default function App() {
 
         const data = await response.json();
         
-        if (data.htmlContent) {
-          // Gelen Paynkolay Formunu Iframe içerisine bas
+        if (response.ok && data.htmlContent) {
           setPaynkolayHtml(data.htmlContent);
         } else {
           throw new Error(data.message || "Ödeme başlatılamadı.");
         }
       } catch (err) {
         console.error("Paynkolay hatası:", err);
-        alert("Ödeme sistemiyle bağlantı kurulamadı. Lütfen bilgilerinizi kontrol edip tekrar deneyin.");
+        alert(err.message || "Ödeme sistemiyle bağlantı kurulamadı. Lütfen bilgilerinizi kontrol edip tekrar deneyin.");
         setCheckoutStep('payment');
       }
     } else {
@@ -257,17 +251,21 @@ export default function App() {
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_donations'), donationData);
 
-        // Yöneticiye E-posta Bildirimi Gönder (Sizin mailinize gider)
-        fetch('/api/send-email', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subject: "YENİ BAĞIŞ: Havale/EFT Bildirimi",
-            message: `${customerInfo.name} isimli kişi ${totalAmount} ₺ tutarında Havale bağışı bildiriminde bulundu. Lütfen banka hesabınızı ve admin panelinizi kontrol edin.`,
-            customerDetails: customerInfo,
-            total: totalAmount
-          })
-        }).catch(e => console.error("E-posta bildirimi gönderilemedi", e));
+        // ÇÖZÜM 2: E-Postanın başarılı şekilde gönderilmesini bekle (await eklendi)
+        try {
+          await fetch('/api/send-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              subject: "YENİ BAĞIŞ: Havale/EFT Bildirimi",
+              message: `${customerInfo.name} isimli kişi ${totalAmount} ₺ tutarında Havale bağışı bildiriminde bulundu. Lütfen banka hesabınızı ve admin panelinizi kontrol edin.`,
+              customerDetails: customerInfo,
+              total: totalAmount
+            })
+          });
+        } catch(emailError) {
+          console.error("Mail gönderilemedi ama bağış alındı", emailError);
+        }
         
         setCheckoutStep('success');
         setCart([]);
@@ -285,15 +283,13 @@ export default function App() {
     const cleanName = groupName.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     
     try {
-      // Grubu listeye ekle
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'ramazan_group_list', cleanName), { created: serverTimestamp() });
-      // Varsayılan fiyatları bu grubun içine kopyala
       const newGroupRef = collection(db, 'artifacts', appId, 'public', 'data', `ramazan_group_${cleanName}`);
       for (const opt of initialDonationOptions) {
         await setDoc(doc(newGroupRef, opt.id), opt);
       }
       setSelectedAdminGroup(cleanName);
-      alert(`Başarılı! Artık sitenizin sonuna /${cleanName} yazarak bu özel fiyatlandırmayı görebilirsiniz.`);
+      alert(`Başarılı! Artık sitenizin sonuna ?grup=${cleanName} yazarak bu özel fiyatlandırmayı görebilirsiniz.`);
     } catch (e) {
       alert("Grup oluşturulurken hata oluştu.");
     }
@@ -484,7 +480,6 @@ export default function App() {
           {adminTab === 'settings' && (
             <div className="space-y-6">
               
-              {/* ÖZEL LİNK / FİYATLANDIRMA ALANI */}
               <div className="bg-[#0f3626] border border-[#d4af37]/50 rounded-xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg">
                 <div className="flex-grow w-full md:w-auto">
                   <label className="text-[#d4af37] text-sm font-bold mb-2 block flex items-center gap-2">
@@ -511,7 +506,7 @@ export default function App() {
               {selectedAdminGroup !== 'default' && (
                 <div className="bg-blue-900/20 border border-blue-500/30 text-blue-200 p-4 rounded-xl flex items-start gap-3">
                   <CheckCircle className="w-6 h-6 text-blue-400 shrink-0 mt-0.5" />
-                  <p className="text-sm">Şu an <strong>/{selectedAdminGroup}</strong> uzantılı özel grubun fiyatlarını düzenliyorsunuz. Bu fiyatları sadece linkin sonuna /{selectedAdminGroup} yazarak girenler görebilir.</p>
+                  <p className="text-sm">Şu an <strong>/{selectedAdminGroup}</strong> uzantılı özel grubun fiyatlarını düzenliyorsunuz. Sitenizin sonuna ?grup={selectedAdminGroup} yazarak test edebilirsiniz.</p>
                 </div>
               )}
 
@@ -861,7 +856,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Tailwind CSS Özel Animasyonlar */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes slide-left { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
