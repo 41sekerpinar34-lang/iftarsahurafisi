@@ -36,6 +36,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [urlGroupId, setUrlGroupId] = useState(null);
+  const [isDataLoading, setIsDataLoading] = useState(true);
 
   const [cart, setCart] = useState([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -56,16 +57,22 @@ export default function App() {
   const [editingImageId, setEditingImageId] = useState(null);
   const [donationsList, setDonationsList] = useState([]); 
 
-  // Yüklenme (Loading) State'i eklendi
-  const [isDataLoading, setIsDataLoading] = useState(true);
-
   // --- 1. KİMLİK DOĞRULAMA VE URL KONTROLÜ ---
   useEffect(() => {
-    // ÇÖZÜM 3: HTML Siteleri için ?grup=10 parametresini yakalama
+    // ÇÖZÜM 3: Güçlendirilmiş URL Parametre Yakalayıcı (?grup=10, ?GRUP10, /10 hepsini anlar)
     const searchParams = new URLSearchParams(window.location.search);
     let potentialGroup = searchParams.get('grup') || searchParams.get('group') || searchParams.get('id');
 
-    // Eğer parametre yoksa, klasik /10 (Vercel) yolunu da destekle
+    if (!potentialGroup) {
+      for (const key of searchParams.keys()) {
+        if (key.toLowerCase().includes('grup')) {
+          potentialGroup = key.toLowerCase().replace('grup', ''); // GRUP10 -> 10
+        } else if (!isNaN(key)) {
+          potentialGroup = key; // ?10 -> 10
+        }
+      }
+    }
+
     if (!potentialGroup) {
       const path = window.location.pathname;
       const parts = path.split('/').filter(Boolean);
@@ -81,7 +88,6 @@ export default function App() {
       setUrlGroupId(potentialGroup);
     }
 
-    // Paynkolay 3D Başarılı Dönüş Kontrolü
     if (searchParams.get('status') === 'success') {
       setIsCartOpen(true);
       setCheckoutStep('success');
@@ -127,14 +133,14 @@ export default function App() {
         initialDonationOptions.forEach(async (opt) => {
           try { await setDoc(doc(optionsRef, opt.id), opt); } catch(err) { }
         });
-        setIsDataLoading(false); // Yükleme bitti
+        setIsDataLoading(false);
       } else {
         const fetchedOptionsMap = {};
         snapshot.forEach((doc) => { fetchedOptionsMap[doc.id] = doc.data(); });
         const mergedOptions = initialDonationOptions.map(initialOpt => ({ ...initialOpt, ...(fetchedOptionsMap[initialOpt.id] || {}) }));
         mergedOptions.sort((a, b) => a.order - b.order);
         setOptions(mergedOptions);
-        setIsDataLoading(false); // Yükleme bitti
+        setIsDataLoading(false);
       }
     });
 
@@ -189,7 +195,8 @@ export default function App() {
 
   const handleShare = async () => {
     const text = `Şekerpınar Nazmi Balcı Erkek Öğrenci Yurdu Ramazan-ı Şerif İftar ve Sahur kampanyasına sen de destek ol!`;
-    const link = window.location.href.replace('#admin', '');
+    // Özel gruba ait URL'yi (sondaki #admin haricinde) aynen alıp paylaşır
+    const link = window.location.href.split('#')[0]; 
     if (navigator.share) {
       try { await navigator.share({ title: 'İftar ve Sahur Bağışı', text: text, url: link }); } catch (err) {}
     } else {
@@ -256,24 +263,19 @@ export default function App() {
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ramazan_donations'), donationData);
 
-        // ÇÖZÜM 2: E-Postanın başarılı şekilde gönderilmesini bekle ve hataları yakala
-        try {
-          const emailRes = await fetch('/api/send-email', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              subject: "YENİ BAĞIŞ: Havale/EFT Bildirimi",
-              message: `${customerInfo.name} isimli kişi ${totalAmount} ₺ tutarında Havale bağışı bildiriminde bulundu. Lütfen banka hesabınızı ve admin panelinizi kontrol edin.`,
-              customerDetails: customerInfo,
-              total: totalAmount
-            })
-          });
-          const emailData = await emailRes.json();
-          if(!emailData.success) console.error("Mail API Hatası:", emailData.error);
-        } catch(emailError) {
-          console.error("Mail gönderilemedi ama bağış alındı", emailError);
-        }
+        // ÇÖZÜM 2: E-Posta işlemini "Beklemeden" arka planda çalıştırıyoruz. Böylece ekran asla donmaz.
+        fetch('/api/send-email', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            subject: "YENİ BAĞIŞ: Havale/EFT Bildirimi",
+            message: `${customerInfo.name} isimli kişi ${totalAmount} ₺ tutarında Havale bağışı bildiriminde bulundu. Lütfen banka hesabınızı ve admin panelinizi kontrol edin.`,
+            customerDetails: customerInfo,
+            total: totalAmount
+          })
+        }).catch(e => console.error("Mail gönderilemedi (arka plan)", e));
         
+        // İşlem tamam, anında başarı ekranına geç!
         setCheckoutStep('success');
         setCart([]);
         setCustomerInfo({ name: '', phone: '' });
@@ -363,7 +365,7 @@ export default function App() {
     }
   };
 
-  // VERİLER YÜKLENİRKEN GÖSTERİLECEK EKRAN
+  // VERİLER YÜKLENİRKEN GÖSTERİLECEK EKRAN (Görüntü kirliliğini önler)
   if (isDataLoading) {
     return (
       <div className="min-h-screen bg-[#071d15] flex flex-col items-center justify-center text-[#d4af37] gap-4">
@@ -807,15 +809,17 @@ export default function App() {
                 </div>
               )}
 
-              {/* ADIM 3: PAYNKOLAY 3D SECURE YÜKLENİYOR / IFRAME */}
+              {/* ÇÖZÜM 2: PAYNKOLAY 3D SECURE EKRANI (İzinler güçlendirildi) */}
               {checkoutStep === 'paynkolay_3d' && (
-                <div className="h-full flex flex-col items-center animate-fade-in bg-white rounded-xl overflow-hidden">
+                <div className="h-full flex flex-col items-center animate-fade-in bg-white rounded-xl overflow-hidden relative">
+                  <button onClick={() => setCheckoutStep('payment')} className="absolute top-2 right-2 bg-red-100 text-red-600 px-3 py-1 rounded-full text-xs font-bold z-10 shadow-md">Geri Dön / İptal</button>
                   {paynkolayHtml ? (
                     <iframe 
                       title="Güvenli Ödeme" 
                       srcDoc={paynkolayHtml} 
                       className="w-full h-full min-h-[500px]" 
                       frameBorder="0" 
+                      sandbox="allow-forms allow-scripts allow-same-origin allow-top-navigation allow-popups"
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center p-8 space-y-4">
@@ -872,6 +876,7 @@ export default function App() {
         </div>
       )}
 
+      {/* Tailwind CSS Özel Animasyonlar */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes slide-left { from { transform: translateX(100%); } to { transform: translateX(0); } }
         @keyframes fade-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }

@@ -16,18 +16,17 @@ export default async function handler(req, res) {
       }
     });
 
-    // Gönderimi doğrulama adımı
-    await transporter.verify();
+    // Vercel ortamında timeout'a sebep olabilen verify() adımı kaldırıldı.
 
     const mailOptions = {
       from: process.env.GMAIL_USER,
-      to: process.env.GMAIL_USER,
+      to: process.env.GMAIL_USER, // Bildirim size geliyor
       subject: subject,
       text: `${message}\n\n-- MÜŞTERİ BİLGİLERİ --\nİsim: ${customerDetails.name}\nTelefon: ${customerDetails.phone}\nToplam Tutar: ${total} ₺`
     };
 
     const info = await transporter.sendMail(mailOptions);
-    console.log("Email gönderildi: " + info.response);
+    console.log("Email gönderildi: " + info.messageId);
     
     res.status(200).json({ success: true, message: 'Email gönderildi.' });
   } catch (error) {
